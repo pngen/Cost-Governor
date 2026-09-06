@@ -1,0 +1,7 @@
+add_executable(cg_bench benchmark.cpp)
+target_link_libraries(cg_bench PRIVATE CostGovernor::CostGovernor Threads::Threads)
+if(MSVC)
+  target_compile_options(cg_bench PRIVATE /W4 /WX /utf-8)
+else()
+  target_compile_options(cg_bench PRIVATE -Wall -Wextra -Werror -Wpedantic)
+endif()

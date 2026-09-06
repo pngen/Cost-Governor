@@ -1,0 +1,8 @@
+add_executable(cg cg_cli.cpp)
+target_link_libraries(cg PRIVATE CostGovernor::CostGovernor)
+if(MSVC)
+  target_compile_options(cg PRIVATE /W4 /WX /utf-8)
+else()
+  target_compile_options(cg PRIVATE -Wall -Wextra -Werror -Wpedantic)
+endif()
+install(TARGETS cg RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

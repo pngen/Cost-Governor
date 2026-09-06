@@ -1,0 +1,6 @@
+enable_language(CUDA)
+find_package(CUDAToolkit REQUIRED)
+add_executable(cuda_proof cuda_proof.cu)
+target_link_libraries(cuda_proof PRIVATE CostGovernor::CostGovernor CUDA::cudart)
+set_target_properties(cuda_proof PROPERTIES CUDA_ARCHITECTURES native)
+set(CMAKE_CUDA_PROPAGATE_HOST_FLAGS OFF)
