@@ -53,8 +53,8 @@ class CostGovernor {
   Status create_budget(const Budget& budget);
   [[nodiscard]] CoordinatorEpoch epoch() const;
   void advance_epoch();                 // fresh epoch on coordinator restart
-  void set_worker_boot(WorkerBootId boot);  // fresh boot on worker restart
-  [[nodiscard]] WorkerBootId worker_boot() const;
+  void set_worker_boot(WorkerId worker, WorkerBootId boot);  // per-worker fresh boot on worker restart
+  [[nodiscard]] WorkerBootId worker_boot(WorkerId worker) const;
 
   // --- price evidence intake (workers publish priced evidence) -----------
   Status publish_price(const PriceObservation& obs);   // boot- and epoch-fenced
@@ -109,7 +109,8 @@ class CostGovernor {
  private:
   PlanEconomics evaluate_plan_locked(const ExecutionPlan& plan) const;
   CostState state_from_breakdown(const CostBreakdown& bd) const;
-  AuthorityContext authority_snapshot_from(const PlanGeneration& plan_gen,
+  WorkerBootId current_boot_for(WorkerId worker) const;   // caller holds the state lock
+  AuthorityContext authority_snapshot_from(const ExecutionPlan& plan,
                                            const WorkloadGeneration& workload_gen) const;
   void build_explanation(CostDecision& d, const ExecutionPlan& best, const PlanEconomics& econ,
                          const WorkloadId& workload, const WorkloadGeneration& workload_gen,

@@ -6,7 +6,7 @@ int main() {
   auto ev = [&](EvidenceId id, AttemptId att, std::int64_t ns, bool success) {
     CostEvidence e;
     e.id = id; e.request = RequestId(1); e.attempt = att; e.attempt_gen = AttemptGeneration(1);
-    e.epoch = CoordinatorEpoch(1); e.boot = WorkerBootId(1); e.generation = EvidenceGeneration(1);
+    e.epoch = CoordinatorEpoch(1); e.worker = WorkerId(1); e.boot = WorkerBootId(1); e.generation = EvidenceGeneration(1);
     e.observed_at_ms = 1000; e.label = DataLabel::POLICY;
     e.accelerator_time = AcceleratorNanoseconds(ns);
     e.is_completion = true; e.completed_successfully = success;

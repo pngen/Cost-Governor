@@ -86,7 +86,7 @@ struct CostGovernor::Impl {
   CostPolicy policy;
   PriceSchedule schedule;
   CoordinatorEpoch epoch;
-  WorkerBootId boot;
+  std::map<WorkerId, WorkerBootId> worker_boots;  // per-worker current incarnation
   bool revalidation_needed = false;
   std::unordered_map<BudgetId, Budget> budgets;
   std::unordered_map<RequestId, std::map<AttemptId, CostEvidence>> attempts;
@@ -146,13 +146,24 @@ void CostGovernor::advance_epoch() {
   impl_->epoch = CoordinatorEpoch(impl_->epoch.value() + 1);
   impl_->revalidation_needed = true;
 }
-void CostGovernor::set_worker_boot(WorkerBootId boot) { impl_->boot = boot; }
-WorkerBootId CostGovernor::worker_boot() const { return impl_->boot; }
+void CostGovernor::set_worker_boot(WorkerId worker, WorkerBootId boot) {
+  std::lock_guard<std::mutex> g(impl_->mtx);
+  impl_->worker_boots[worker] = boot;
+}
+WorkerBootId CostGovernor::worker_boot(WorkerId worker) const {
+  std::lock_guard<std::mutex> g(impl_->mtx);
+  auto it = impl_->worker_boots.find(worker);
+  return it == impl_->worker_boots.end() ? WorkerBootId() : it->second;
+}
+WorkerBootId CostGovernor::current_boot_for(WorkerId worker) const {
+  auto it = impl_->worker_boots.find(worker);
+  return it == impl_->worker_boots.end() ? WorkerBootId() : it->second;
+}
 
 Status CostGovernor::publish_price(const PriceObservation& obs) {
   std::lock_guard<std::mutex> g(impl_->mtx);
   if (obs.epoch != impl_->epoch) return Status::STALE_AUTHORITY;
-  if (obs.boot.valid() && obs.boot != impl_->boot) return Status::STALE_AUTHORITY;
+  if (obs.boot.valid() && obs.boot != current_boot_for(obs.worker)) return Status::STALE_AUTHORITY;
   if (!obs.valid_currency(impl_->policy.currency)) return Status::CURRENCY_MISMATCH;
   if (obs.amount.negative()) return Status::INVALID_INPUT;
   for (auto& o : impl_->schedule.observations) {
@@ -167,7 +178,7 @@ Status CostGovernor::publish_price(const PriceObservation& obs) {
 Status CostGovernor::record_attempt(const CostEvidence& evidence) {
   std::lock_guard<std::mutex> g(impl_->mtx);
   if (evidence.epoch != impl_->epoch) return Status::STALE_AUTHORITY;
-  if (evidence.boot != impl_->boot) return Status::STALE_AUTHORITY;
+  if (evidence.boot != current_boot_for(evidence.worker)) return Status::STALE_AUTHORITY;
   if (evidence.label == DataLabel::UNSUPPORTED) return Status::INVALID_INPUT;
   if (evidence.accelerator_time.count() < 0 || evidence.energy.count() < 0 ||
       evidence.transfer.count() < 0 || evidence.memory_hold.count() < 0 ||
@@ -329,16 +340,17 @@ CostState CostGovernor::state_from_breakdown(const CostBreakdown& bd) const {
   return st;
 }
 
-AuthorityContext CostGovernor::authority_snapshot_from(const PlanGeneration& plan_gen,
+AuthorityContext CostGovernor::authority_snapshot_from(const ExecutionPlan& plan,
                                                        const WorkloadGeneration& workload_gen) const {
   const Impl& ig = *impl_;
   AuthorityContext ctx;
   ctx.epoch = ig.epoch;
   ctx.policy_generation = ig.policy.generation;
   ctx.price_generation = ig.schedule.generation;
-  ctx.plan_generation = plan_gen;
+  ctx.plan_generation = plan.generation;
   ctx.workload_generation = workload_gen;
-  ctx.boot = ig.boot;
+  ctx.worker = plan.worker;
+  ctx.boot = current_boot_for(plan.worker);
   ctx.budget_generation = BudgetGeneration(0);
   return ctx;
 }
@@ -353,7 +365,7 @@ void CostGovernor::build_explanation(CostDecision& d, const ExecutionPlan& best,
   ex.projected = econ.projected;
   ex.label = best.label;
   ex.selected = best.id;
-  ex.authority = authority_snapshot_from(best.generation, workload_gen);
+  ex.authority = authority_snapshot_from(best, workload_gen);
   (void)workload;
   for (const auto& p : plans) {
     if (p.id == best.id) continue;
@@ -438,7 +450,7 @@ CostDecision CostGovernor::evaluate(const WorkloadId& workload, const WorkloadGe
   for (const auto& [bid, b] : ig.budgets) { (void)bid; if (b.mode == BudgetMode::HARD) { remaining = b.remaining(); break; } }
   d.remaining_budget = remaining;
   d.state = state_from_breakdown(best.econ.projected);
-  d.authority = authority_snapshot_from(best.plan->generation, workload_gen);
+  d.authority = authority_snapshot_from(*best.plan, workload_gen);
   build_explanation(d, *best.plan, best.econ, workload, workload_gen, plans);
   return d;
 }
@@ -450,7 +462,7 @@ Status CostGovernor::validate_for_dispatch(const CostDecision& prior, const std:
   if (prior.authority.epoch != ig.epoch) return Status::STALE_AUTHORITY;
   if (prior.authority.policy_generation != ig.policy.generation) return Status::STALE_AUTHORITY;
   if (prior.authority.price_generation != ig.schedule.generation) return Status::STALE_AUTHORITY;
-  if (prior.authority.boot != ig.boot) return Status::STALE_AUTHORITY;
+  if (prior.authority.boot != current_boot_for(prior.authority.worker)) return Status::STALE_AUTHORITY;
   if (ig.revalidation_needed) return Status::STALE_EVIDENCE;
   for (const auto& plan : candidate_plans) {
     if (plan.id == prior.selected_plan) {

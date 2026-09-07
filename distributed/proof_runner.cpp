@@ -27,8 +27,8 @@ using namespace cgproto;
 namespace {
 int g_pass = 0, g_fail = 0;
 void ok(const std::string& name, bool cond, const std::string& detail = "") {
-  if (cond) { ++g_pass; std::cout << "[PASS] " << name << "\n"; }
-  else { ++g_fail; std::cout << "[FAIL] " << name << " " << detail << "\n"; }
+  if (cond) { ++g_pass; std::cout << "[PASS] " << name << std::endl; }
+  else { ++g_fail; std::cout << "[FAIL] " << name << " " << detail << std::endl; }
 }
 
 int find_free_port() {
@@ -89,8 +89,8 @@ struct Client {
   bool connected(int port) { Sock s; if (!connect_to(port, s)) return false; ep.sock = std::move(s); return true; }
   void send(Msg t, const std::vector<std::uint8_t>& p) { ep.send(t, p); }
   bool recv(Msg& t, std::vector<std::uint8_t>& p) { return ep.recv(t, p); }
-  void hello(WorkerBootId boot) { Writer w; w.u64(boot.value()); send(Msg::HELLO, w.data()); Msg t; std::vector<std::uint8_t> py; recv(t, py); }
-  void publish(const PriceObservation& o) { Writer w; encode_price(w, o); send(Msg::PUBLISH_PRICE, w.data()); Msg t; std::vector<std::uint8_t> py; recv(t, py); }
+  void hello(WorkerId worker, WorkerBootId boot) { Writer w; w.u64(worker.value()); w.u64(boot.value()); send(Msg::HELLO, w.data()); Msg t; std::vector<std::uint8_t> py; recv(t, py); }
+  Status publish(const PriceObservation& o) { Writer w; encode_price(w, o); send(Msg::PUBLISH_PRICE, w.data()); Msg t; std::vector<std::uint8_t> py; recv(t, py); Reader r(py.data(), py.size()); return static_cast<Status>(r.u8()); }
   DecisionResult eval(WorkloadId wl, WorkloadGeneration wg, const std::vector<ExecutionPlan>& plans) {
     Writer w; w.u64(wl.value()); w.u64(wg.value()); w.u32(static_cast<std::uint32_t>(plans.size()));
     for (const auto& p : plans) encode_plan(w, p);
@@ -122,6 +122,25 @@ std::string dir_of_self() {
 #endif
 }
 
+PriceObservation mk_price(EvidenceId id, PriceKind kind, DeviceId dev, MoneyMicros amt,
+                          WorkerId worker, WorkerBootId boot, std::int64_t now) {
+  PriceObservation o;
+  o.id = id; o.kind = kind; o.device = dev; o.amount = amt; o.currency = MoneyMicros::kDefaultCurrency;
+  o.label = DataLabel::POLICY; o.provenance = Provenance::CONFIGURED_POLICY;
+  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.worker = worker; o.boot = boot;
+  return o;
+}
+CostEvidence mk_attempt(EvidenceId id, RequestId req, AttemptId att, DeviceId dev,
+                        WorkerId worker, WorkerBootId boot, std::int64_t ns, std::int64_t now) {
+  CostEvidence e;
+  e.id = id; e.request = req; e.attempt = att; e.attempt_gen = AttemptGeneration(1);
+  e.epoch = CoordinatorEpoch(1); e.worker = worker; e.boot = boot; e.generation = EvidenceGeneration(1);
+  e.observed_at_ms = now; e.device = dev; e.label = DataLabel::POLICY;
+  e.accelerator_time = AcceleratorNanoseconds(ns);
+  e.is_completion = true; e.completed_successfully = true;
+  return e;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -141,107 +160,142 @@ int main(int argc, char** argv) {
   const std::string coord = dir + "/coordinator", wk = dir + "/worker";
 #endif
 
-  // --- start coordinator ---
-  std::string coord_args = std::to_string(port) + " " + state;
+  std::cout << "cost-governor distributed proof (per-worker boot authority) starting" << std::endl;
+  const WorkerId kA(1), kB(2);
+  const WorkerBootId A1(10), A2(11), B1(20), B2(21);
+  const DeviceId devA(1), devB(2);
+
+  auto wait_for_obs = [&](Client& c, std::uint64_t want) {
+    std::uint64_t ep = 0, pg = 0, polg = 0, bds = 0, obs = 0;
+    for (int i = 0; i < 400; ++i) { c.state(ep, pg, polg, bds, obs); if (obs >= want) return obs; std::this_thread::sleep_for(std::chrono::milliseconds(25)); }
+    return obs;
+  };
+
+  // Quote the state path: it contains spaces in this working-tree layout.
+  // Quote the state path: it contains spaces in this working-tree layout.
+  std::string coord_args = std::to_string(port) + " \"" + state + "\"";
   Child coordinator = spawn(coord, coord_args);
   if (coordinator.pid == 0) { std::cerr << "could not spawn coordinator\n"; return 2; }
   Client ctl;
   for (int i = 0; i < 200 && !ctl.connected(port); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ok("coordinator ready", ctl.ep.sock.valid());
+  if (!ctl.ep.sock.valid()) { kill(coordinator); return 2; }
 
-  bool ok1 = ctl.ep.sock.valid();
-  ok("coordinator ready", ok1);
-  if (!ok1) { kill(coordinator); return 2; }
-
-  // --- start worker A and B (real processes publishing price evidence) ---
   Child workerA = spawn(wk, std::to_string(port) + " A --stay");
   Child workerB = spawn(wk, std::to_string(port) + " B --stay");
-  { std::uint64_t ep, pg2, pg3, bds, o; for (int i = 0; i < 200; ++i) { ctl.state(ep, pg2, pg3, bds, o); if (o >= 4) break; std::this_thread::sleep_for(std::chrono::milliseconds(25)); } }
+  { std::uint64_t o = wait_for_obs(ctl, 4);
+    ok("scenario A: A (boot A1) and B (boot B1) both published 4 observations", o >= 4, std::string("obs=") + std::to_string(o)); }
 
-  // Scenario A: two workers publish different cost evidence; governor picks legal cheapest.
   ExecutionPlan p1; p1.id = PlanId(1); p1.generation = PlanGeneration(1); p1.workload = WorkloadId(1); p1.workload_generation = WorkloadGeneration(1);
-  p1.device = DeviceId(1); p1.expected_accelerator_time = AcceleratorNanoseconds(2'000'000'000); p1.expected_requests = 1;
+  p1.device = devA; p1.worker = kA; p1.expected_accelerator_time = AcceleratorNanoseconds(2'000'000'000); p1.expected_requests = 1;
   ExecutionPlan p2; p2.id = PlanId(2); p2.generation = PlanGeneration(1); p2.workload = WorkloadId(1); p2.workload_generation = WorkloadGeneration(1);
-  p2.device = DeviceId(2); p2.expected_accelerator_time = AcceleratorNanoseconds(1'000'000'000);
+  p2.device = devB; p2.worker = kB; p2.expected_accelerator_time = AcceleratorNanoseconds(1'000'000'000);
   p2.expected_transfer = TransferBytes(5'000'000'000); p2.expected_requests = 1;
   std::vector<ExecutionPlan> plans{p1, p2};
   DecisionResult ra = ctl.eval(WorkloadId(1), WorkloadGeneration(1), plans);
-  ok("scenario A: deterministic cheapest plan", ra.kind == 0 && ra.selected == 1, std::string("kind=") + std::to_string(ra.kind) + " selected=" + std::to_string(ra.selected));
+  ok("scenario A: deterministic cheapest plan (A1+B1 evidence)", ra.kind == 0 && ra.selected == 1,
+     std::string("kind=") + std::to_string(ra.kind) + " selected=" + std::to_string(ra.selected));
 
-  // Scenario F: authorize, then advance price generation, then pre-dispatch revalidation rejects.
+  ok("scenario A2: A1 price accepted", ctl.publish(mk_price(EvidenceId(7001), PriceKind::ACCELERATOR_TIME, devA, MoneyMicros::from_micros(5000), kA, A1, kNow)) == Status::OK);
+  ok("scenario A2: B1 price accepted", ctl.publish(mk_price(EvidenceId(7002), PriceKind::ACCELERATOR_TIME, devB, MoneyMicros::from_micros(1000), kB, B1, kNow)) == Status::OK);
+  ok("scenario A2: A1 evidence accepted", ctl.record(mk_attempt(EvidenceId(7101), RequestId(900), AttemptId(1), devA, kA, A1, 1'000'000'000, kNow)) == Status::OK);
+  ok("scenario A2: B1 evidence accepted", ctl.record(mk_attempt(EvidenceId(7102), RequestId(901), AttemptId(1), devB, kB, B1, 1'000'000'000, kNow)) == Status::OK);
+
   {
-    PriceObservation np; np.id = EvidenceId(900); np.kind = PriceKind::ACCELERATOR_TIME; np.device = DeviceId(1);
-    np.amount = MoneyMicros::from_micros(9000); np.currency = MoneyMicros::kDefaultCurrency; np.label = DataLabel::POLICY;
-    np.observed_at_ms = kNow; np.epoch = CoordinatorEpoch(1); np.boot = WorkerBootId(99);
-    ctl.hello(WorkerBootId(99));
-    ctl.publish(np);  // bumps price schedule generation
+    PriceObservation np = mk_price(EvidenceId(900), PriceKind::ACCELERATOR_TIME, devA, MoneyMicros::from_micros(9000), kA, A1, kNow);
+    ok("scenario F: price generation advanced", ctl.publish(np) == Status::OK);
     Status st = ctl.revalidate(plans);
     ok("scenario F: stale plan rejected before dispatch", st == Status::STALE_AUTHORITY, std::string(status_name(st)));
-    ok("scenario F: price generation advanced", true);
   }
 
-  // Scenario B: hard budget. device2 huge transfer exceeds hard ceiling.
-  ExecutionPlan pBig; pBig.id = PlanId(3); pBig.generation = PlanGeneration(1); pBig.workload = WorkloadId(1); pBig.workload_generation = WorkloadGeneration(1);
-  pBig.device = DeviceId(2); pBig.expected_transfer = TransferBytes(2'000'000'000'000LL); pBig.expected_requests = 1;
-  DecisionResult rb = ctl.eval(WorkloadId(1), WorkloadGeneration(1), {pBig});
-  ok("scenario B: hard budget rejection", rb.kind == 4, std::string("kind=") + std::to_string(rb.kind));
+  {
+    auto mkE = [&](EvidenceId id, AttemptId att, std::int64_t ns, bool success) {
+      CostEvidence e = mk_attempt(id, RequestId(1), att, devA, kA, A1, ns, kNow);
+      e.completed_successfully = success; return e;
+    };
+    Status e1 = ctl.record(mkE(EvidenceId(50), AttemptId(1), 2'000'000'000, false));
+    Status e2 = ctl.record(mkE(EvidenceId(51), AttemptId(2), 3'000'000'000, true));
+    ok("scenario E: attempts recorded", e1 == Status::OK && e2 == Status::OK, std::string("e1=") + std::string(status_name(e1)) + " e2=" + std::string(status_name(e2)));
+    auto [rs, rcost] = ctl.realize(RequestId(1), WorkloadId(1));
+    ok("scenario E: realized cost includes failed attempts", rs == Status::OK && rcost > 0, std::string(status_name(rs)) + " cost=" + std::to_string(rcost));
+    Status e2d = ctl.record(mkE(EvidenceId(51), AttemptId(2), 3'000'000'000, true));
+    ok("scenario E: duplicate completion rejected, no double-charge", e2d == Status::INVALID_INPUT, std::string(status_name(e2d)));
+  }
 
-  // Scenario E: retry economics. Attempt 1 fails, attempt 2 succeeds; duplicate no double-charge.
-  ctl.hello(WorkerBootId(99));
-  auto mk = [&](EvidenceId id, AttemptId att, std::int64_t ns, bool success) {
-    CostEvidence e; e.id = id; e.request = RequestId(1); e.attempt = att; e.attempt_gen = AttemptGeneration(1);
-    e.epoch = CoordinatorEpoch(1); e.boot = WorkerBootId(99); e.generation = EvidenceGeneration(1); e.observed_at_ms = kNow;
-    e.device = DeviceId(1); e.accelerator_time = AcceleratorNanoseconds(ns); e.is_completion = true; e.completed_successfully = success; return e;
-  };
-  Status e1 = ctl.record(mk(EvidenceId(50), AttemptId(1), 2'000'000'000, false));
-  Status e2 = ctl.record(mk(EvidenceId(51), AttemptId(2), 3'000'000'000, true));
-  ok("scenario E: attempts recorded", e1 == Status::OK && e2 == Status::OK, "e1=" + std::string(status_name(e1)) + " e2=" + std::string(status_name(e2)));
-  auto [rs, rcost] = ctl.realize(RequestId(1), WorkloadId(1));
-  ok("scenario E: realized cost includes failed attempt", rs == Status::OK, std::string(status_name(rs)));
-  Status e2d = ctl.record(mk(EvidenceId(51), AttemptId(2), 3'000'000'000, true));
-  ok("scenario E: duplicate completion rejected, no double-charge", e2d == Status::INVALID_INPUT, std::string(status_name(e2d)));
+  {
+    ExecutionPlan pBig; pBig.id = PlanId(3); pBig.generation = PlanGeneration(1); pBig.workload = WorkloadId(1); pBig.workload_generation = WorkloadGeneration(1);
+    pBig.device = devB; pBig.worker = kB; pBig.expected_transfer = TransferBytes(2'000'000'000'000LL); pBig.expected_requests = 1;
+    DecisionResult rb = ctl.eval(WorkloadId(1), WorkloadGeneration(1), {pBig});
+    ok("scenario B: hard budget rejection", rb.kind == 4, std::string("kind=") + std::to_string(rb.kind));
+  }
 
-  // --- Worker death: kill worker A; fresh WorkerBootId; stale replay rejects ---
-  // Ensure current active boot is worker A's (10) by re-sending HELLO as control.
+  kill(workerB);
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  Child workerB2 = spawn(wk, std::to_string(port) + " B --stay --boot 21");
+  {
+    bool reg = false;
+    for (int i = 0; i < 200; ++i) {
+      if (ctl.publish(mk_price(EvidenceId(7002), PriceKind::ACCELERATOR_TIME, devB, MoneyMicros::from_micros(1000), kB, B2, kNow)) == Status::OK) { reg = true; break; }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    ok("scenario C: B2 (worker B boot B2) reconnected", reg);
+    ok("scenario C: B1 stale price rejected", ctl.publish(mk_price(EvidenceId(7003), PriceKind::ACCELERATOR_TIME, devB, MoneyMicros::from_micros(1000), kB, B1, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C: B1 stale attempt rejected", ctl.record(mk_attempt(EvidenceId(7103), RequestId(910), AttemptId(1), devB, kB, B1, 1'000'000'000, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C: B1 stale completion rejected", ctl.record(mk_attempt(EvidenceId(7104), RequestId(911), AttemptId(1), devB, kB, B1, 1'000'000'000, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C: A1 remains current (price accepted)", ctl.publish(mk_price(EvidenceId(7004), PriceKind::TRANSFER, devA, MoneyMicros::from_micros(1000), kA, A1, kNow)) == Status::OK);
+    ok("scenario C: A1 evidence accepted", ctl.record(mk_attempt(EvidenceId(7105), RequestId(912), AttemptId(1), devA, kA, A1, 1'000'000'000, kNow)) == Status::OK);
+    DecisionResult ra2 = ctl.eval(WorkloadId(1), WorkloadGeneration(1), plans);
+    ok("scenario C: A1 still participates (deterministic selection)", ra2.kind == 0 && ra2.selected == 1,
+       std::string("kind=") + std::to_string(ra2.kind) + " selected=" + std::to_string(ra2.selected));
+  }
+
   kill(workerA);
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
-  Child workerA2 = spawn(wk, std::to_string(port) + " A --stay --boot 11");  // fresh WorkerBootId
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  // coordinator's current boot is now 11 (worker A2's fresh boot); stale old-boot attempt replay rejects.
-  CostEvidence stale_att = mk(EvidenceId(60), AttemptId(3), 1'000'000'000, true);
-  stale_att.boot = WorkerBootId(10);
-  Status cs = ctl.record(stale_att);
-  ok("scenario C: stale old-boot completion rejected", cs == Status::STALE_AUTHORITY, std::string(status_name(cs)));
-  CostEvidence fresh_att = mk(EvidenceId(61), AttemptId(3), 1'000'000'000, true);
-  fresh_att.boot = WorkerBootId(11);
-  Status cf = ctl.record(fresh_att);
-  ok("scenario C: fresh WorkerBootId accepted", cf == Status::OK, std::string(status_name(cf)));
-  std::uint64_t epoch, pg, polg, budgets, obs;
-  ctl.state(epoch, pg, polg, budgets, obs);
-
-  // Scenario D: coordinator restart. Persist state (control triggers a finalize which persists? no).
-  kill(coordinator);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  Child c2 = spawn(coord, coord_args);
-  Client ctl2;
-  for (int i = 0; i < 200 && !ctl2.connected(port); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  ok("scenario D: coordinator restarted", ctl2.ep.sock.valid());
-  std::uint64_t e2e, p2g, pol2g, b2, o2;
-  ctl2.state(e2e, p2g, pol2g, b2, o2);
-  ok("scenario D: fresh epoch after restart", e2e > epoch, std::string("before=") + std::to_string(epoch) + " after=" + std::to_string(e2e));
-
-  // old-epoch traffic rejected: publish a price with old epoch
-  PriceObservation oldp; oldp.id = EvidenceId(777); oldp.kind = PriceKind::ACCELERATOR_TIME; oldp.device = DeviceId(1);
-  oldp.amount = MoneyMicros::from_micros(1000); oldp.currency = MoneyMicros::kDefaultCurrency; oldp.label = DataLabel::POLICY;
-  oldp.observed_at_ms = 1000; oldp.epoch = CoordinatorEpoch(1);
-  ctl2.publish(oldp);  // returns nothing; we can't easily read ack here since publish() consumed it
-  // To assert, send an explicit stale price and read status via a custom exchange:
+  Child workerA2 = spawn(wk, std::to_string(port) + " A --stay --boot 11");
   {
-    Writer w; encode_price(w, oldp); ctl2.send(Msg::PUBLISH_PRICE, w.data()); Msg t; std::vector<std::uint8_t> py; ctl2.recv(t, py);
-    Reader rr(py.data(), py.size()); Status st = static_cast<Status>(rr.u8());
-    ok("scenario D: old-epoch price rejected", st == Status::STALE_AUTHORITY, std::string(status_name(st)));
+    bool reg = false;
+    for (int i = 0; i < 200; ++i) {
+      if (ctl.publish(mk_price(EvidenceId(7001), PriceKind::ACCELERATOR_TIME, devA, MoneyMicros::from_micros(5000), kA, A2, kNow)) == Status::OK) { reg = true; break; }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    ok("scenario C2: A2 (worker A boot A2) reconnected", reg);
+    ok("scenario C2: A1 stale price rejected", ctl.publish(mk_price(EvidenceId(7005), PriceKind::ACCELERATOR_TIME, devA, MoneyMicros::from_micros(5000), kA, A1, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C2: A1 stale attempt rejected", ctl.record(mk_attempt(EvidenceId(7106), RequestId(913), AttemptId(1), devA, kA, A1, 1'000'000'000, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C2: A1 stale completion rejected", ctl.record(mk_attempt(EvidenceId(7107), RequestId(914), AttemptId(1), devA, kA, A1, 1'000'000'000, kNow)) == Status::STALE_AUTHORITY);
+    ok("scenario C2: B2 remains current (price accepted)", ctl.publish(mk_price(EvidenceId(7006), PriceKind::TRANSFER, devB, MoneyMicros::from_micros(10000), kB, B2, kNow)) == Status::OK);
+    ok("scenario C2: B2 evidence accepted (no cross-invalidation)", ctl.record(mk_attempt(EvidenceId(7108), RequestId(915), AttemptId(1), devB, kB, B2, 1'000'000'000, kNow)) == Status::OK);
   }
 
-  kill(coordinator); kill(workerA2); kill(workerB); kill(c2);
+  {
+    const WorkerId kW(3); const WorkerBootId W0(50), W1(51); const DeviceId devW(1);
+    ctl.hello(kW, W0);
+    ExecutionPlan pw; pw.id = PlanId(7); pw.generation = PlanGeneration(1); pw.workload = WorkloadId(2); pw.workload_generation = WorkloadGeneration(1);
+    pw.device = devW; pw.worker = kW; pw.expected_accelerator_time = AcceleratorNanoseconds(1'000'000'000); pw.expected_requests = 1;
+    std::vector<ExecutionPlan> pwplans{pw};
+    DecisionResult rd = ctl.eval(WorkloadId(2), WorkloadGeneration(1), pwplans);
+    ok("scenario D: worker-3 dispatch authorized", rd.kind == 0 && rd.selected == 7, std::string("kind=") + std::to_string(rd.kind));
+    ctl.hello(kW, W1);
+    ok("scenario D: stale (worker,boot) dispatch rejected", ctl.revalidate(pwplans) == Status::STALE_AUTHORITY);
+  }
+
+  {
+    std::uint64_t epoch = 0, pg = 0, polg = 0, budgets = 0, obs = 0;
+    ctl.state(epoch, pg, polg, budgets, obs);
+    kill(coordinator);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    Child c2 = spawn(coord, coord_args);
+    Client ctl2;
+    for (int i = 0; i < 200 && !ctl2.connected(port); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ok("scenario D: coordinator restarted", ctl2.ep.sock.valid());
+    std::uint64_t e2e = 0, p2g = 0, pol2g = 0, b2 = 0, o2 = 0;
+    ctl2.state(e2e, p2g, pol2g, b2, o2);
+    ok("scenario D: fresh epoch after restart", e2e > epoch, std::string("before=") + std::to_string(epoch) + " after=" + std::to_string(e2e));
+    PriceObservation oldp = mk_price(EvidenceId(777), PriceKind::ACCELERATOR_TIME, devA, MoneyMicros::from_micros(1000), kA, A1, kNow);
+    oldp.epoch = CoordinatorEpoch(1);
+    Status oldst = ctl2.publish(oldp);
+    ok("scenario D: old-epoch price rejected", oldst == Status::STALE_AUTHORITY, std::string(status_name(oldst)));
+    kill(coordinator); kill(workerA2); kill(workerB2); kill(c2);
+  }
 
   std::cout << "\nDistributed proof: " << g_pass << " passed, " << g_fail << " failed\n";
   return g_fail == 0 ? 0 : 1;

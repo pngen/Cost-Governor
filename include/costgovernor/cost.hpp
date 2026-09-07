@@ -52,7 +52,8 @@ struct CostEvidence {
   WorkloadId workload;
   AttemptId attempt;
   AttemptGeneration attempt_gen;
-  WorkerBootId boot;             // which worker produced this evidence
+  WorkerId worker;             // which worker produced this evidence
+  WorkerBootId boot;           // the worker's incarnation at evidence time
   CoordinatorEpoch epoch;
   EvidenceGeneration generation; // freshness/generation fence
   std::int64_t observed_at_ms = 0;

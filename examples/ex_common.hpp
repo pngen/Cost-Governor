@@ -15,7 +15,7 @@ inline std::shared_ptr<CostGovernor> gov(const char* currency = MoneyMicros::kDe
   p.price_schedule_max_age_ms = 30000;
   p.allow_policy = true; p.allow_measured = true; p.allow_synthetic = true;
   g->set_policy(p);
-  g->set_worker_boot(WorkerBootId(1));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   return g;
 }
 inline void accel_price(std::shared_ptr<CostGovernor>& g, std::int64_t micros_per_sec,
@@ -27,7 +27,7 @@ inline void accel_price(std::shared_ptr<CostGovernor>& g, std::int64_t micros_pe
   o.amount = MoneyMicros::from_micros(micros_per_sec);
   o.currency = MoneyMicros::kDefaultCurrency;
   o.label = DataLabel::POLICY; o.provenance = Provenance::CONFIGURED_POLICY;
-  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.boot = WorkerBootId(1);
+  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.worker = WorkerId(1); o.boot = WorkerBootId(1);
   s.observations.push_back(o);
   g->set_price_schedule(s);
 }
@@ -37,7 +37,7 @@ inline void transfer_price(std::shared_ptr<CostGovernor>& g, std::int64_t micros
   o.amount = MoneyMicros::from_micros(micros_per_gb);
   o.currency = MoneyMicros::kDefaultCurrency;
   o.label = DataLabel::POLICY; o.provenance = Provenance::CONFIGURED_POLICY;
-  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.boot = WorkerBootId(1);
+  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.worker = WorkerId(1); o.boot = WorkerBootId(1);
   PriceSchedule s = g->price_schedule();
   s.observations.push_back(o);
   g->set_price_schedule(s);

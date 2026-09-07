@@ -8,7 +8,7 @@ std::shared_ptr<CostGovernor> fresh_gov() {
   auto clock = std::make_shared<MockClock>(1000);
   auto g = std::make_shared<CostGovernor>(clock);
   g->set_policy(th::policy());
-  g->set_worker_boot(WorkerBootId(7));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(7));
   return g;
 }
 PriceSchedule sched(std::int64_t now = 1000) {
@@ -38,7 +38,7 @@ CG_TEST_CASE(Authority_boot_fencing_rejects_replay) {
   e.accelerator_time = AcceleratorNanoseconds(1'000'000'000);
   CG_CHECK(g->record_attempt(e) == Status::OK);
   // worker restarts => new boot id; replay of old-boot evidence rejects
-  g->set_worker_boot(WorkerBootId(99));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(99));
   CostEvidence replay = th::attempt(EvidenceId(1), RequestId(1), AttemptId(1), AttemptGeneration(1), CoordinatorEpoch(1), WorkerBootId(7), EvidenceGeneration(1), 1000);
   CG_CHECK(g->record_attempt(replay) == Status::STALE_AUTHORITY);
 }

@@ -9,3 +9,7 @@ foreach(t ${CG_DIST_TARGETS})
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror -Wpedantic)
   endif()
 endforeach()
+
+# Register the real multiprocess proof so `ctest` exercises it too.
+add_test(NAME distributed_proof COMMAND proof_runner)
+set_tests_properties(distributed_proof PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

@@ -13,12 +13,12 @@ std::shared_ptr<CostGovernor> make_gov() {
   p.max_evidence_age_ms = 30000; p.price_schedule_max_age_ms = 30000;
   p.allow_policy = true; p.allow_measured = true; p.allow_synthetic = true;
   g->set_policy(p);
-  g->set_worker_boot(WorkerBootId(1));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   PriceSchedule s; s.id = PriceScheduleId(1); s.generation = PriceScheduleGeneration(1); s.created_at_ms = kNow;
   auto add = [&](EvidenceId id, PriceKind k, MoneyMicros amt) {
     PriceObservation o; o.id = id; o.kind = k; o.amount = amt; o.currency = MoneyMicros::kDefaultCurrency;
     o.label = DataLabel::POLICY; o.provenance = Provenance::CONFIGURED_POLICY; o.observed_at_ms = kNow;
-    o.epoch = CoordinatorEpoch(1); o.boot = WorkerBootId(1); s.observations.push_back(o);
+    o.epoch = CoordinatorEpoch(1); o.worker = WorkerId(1); o.boot = WorkerBootId(1); s.observations.push_back(o);
   };
   add(EvidenceId(1), PriceKind::ACCELERATOR_TIME, MoneyMicros::from_micros(1000));
   add(EvidenceId(2), PriceKind::TRANSFER, MoneyMicros::from_micros(10000));

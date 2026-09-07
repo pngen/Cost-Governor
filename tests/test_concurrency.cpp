@@ -9,7 +9,7 @@ using namespace costgovernor;
 CG_TEST_CASE(Concurrency_concurrent_evidence_ingestion) {
   auto g = std::make_shared<CostGovernor>(std::make_shared<MockClock>(1000));
   g->set_policy(th::policy());
-  g->set_worker_boot(WorkerBootId(1));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   const int kThreads = 8, kPer = 500;
   std::vector<std::thread> ts;
   std::atomic<int> ok{0}, bad{0};

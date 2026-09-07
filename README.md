@@ -45,7 +45,7 @@ Cost is represented with exact typed units; money is never an untyped double.
 - **Money** — `MoneyMicros`: integer micro-units of a single configured currency. Addition and
   subtraction are exact; multiplication/division are checked and use an explicit rounding
   policy; overflow, NaN, and Inf are impossible by construction; serialization is
-  deterministic. In v1.0.0 a single currency ("USD") is supported; currencies never mix
+  deterministic. In v1.0.1 a single currency ("USD") is supported; currencies never mix
   silently.
 - **Typed units** — `EnergyMicroJoules`, `AcceleratorNanoseconds`, `TransferBytes`,
   `MemoryByteNanoseconds`, `Bytes`, `Tokens`, `Requests`, `Operations`, and
@@ -111,10 +111,13 @@ FAILOVER, RECOMPUTE) are evaluated for cost but never executed by Cost Governor.
 
 Decision and intervention authority is bound to a snapshot of generations: CoordinatorEpoch,
 CostPolicyGeneration, PriceScheduleGeneration, EvidenceGeneration, PlanGeneration,
-WorkloadGeneration, WorkerBootId, ResourceGeneration, PlacementGeneration, RecoveryGeneration,
-and BudgetGeneration. Stale actions are rejected without mutating state. Pre-dispatch
-revalidation re-checks authority, freshness, candidate existence, feasibility, and hard
-constraints; a stale plan is never dispatched.
+WorkloadGeneration, WorkerId + WorkerBootId (per-worker incarnation), ResourceGeneration,
+PlacementGeneration, RecoveryGeneration, and BudgetGeneration. Stale actions are rejected
+without mutating state. Worker boot authority is **per worker**: each worker (identified by
+`WorkerId`) holds its own current `WorkerBootId`, so a worker restart fences only that worker's
+prior price/evidence/attempt/dispatch/completion traffic and never invalidates another worker's
+authority. Pre-dispatch revalidation re-checks authority, freshness, candidate existence,
+feasibility, and hard constraints; a stale plan is never dispatched.
 
 ## Persistence and restart
 
@@ -130,13 +133,18 @@ recovered dynamic evidence requires revalidation before any current cost decisio
 A real multiprocess proof (`distributed/`) uses framed, versioned, bounded, checksummed TCP
 loopback between a coordinator process, Worker A, and Worker B. The transport handles partial
 read/writes, concurrent writes, malformed frames, oversized frames, version mismatch, and
-checksum failure. The proof drives six scenarios: (A) two workers publishing different
-device-scoped cost evidence and the governor selecting the legal cheapest; (B) hard-budget
-rejection with no feasible plan; (C) real worker process kill and fresh WorkerBootId with stale
-old-boot replay rejected; (D) real coordinator process kill/restart with epoch advance and
-old-epoch traffic rejected; (E) retry economics with failed-attempt cost and duplicate-completion
-protection; (F) price-generation advance invalidating a previously authorized plan at
-pre-dispatch revalidation. All scenarios pass.
+checksum failure. The proof drives the scenarios below and all pass: (A) two workers publishing
+different device-scoped cost evidence and the governor selecting the legal cheapest; (A2) both
+workers publish/record under their own boot without clobbering one another; (B) hard-budget
+rejection with no feasible plan; (C) real worker B process kill/restart to a fresh boot where
+B's old-boot price/evidence/attempt/completion traffic is fenced stale while A's authority
+remains current and continues publishing/participating; (C2) real worker A process kill/restart
+where A's old-boot traffic is fenced stale while B's current boot remains valid (no
+cross-worker invalidation); (D) a boot-only incarnation change makes a prior dispatch stale
+(dispatch fenced by the worker identity + boot pair) and a real coordinator process kill/restart
+advances the epoch and rejects old-epoch traffic; (E) retry economics with failed-attempt cost
+and duplicate-completion protection; (F) price-generation advance invalidating a previously
+authorized plan at pre-dispatch revalidation.
 
 ## CUDA proof
 
@@ -198,7 +206,11 @@ cmake --install build --prefix <prefix>
 ```
 
 Options: `CG_BUILD_TESTS`, `CG_BUILD_EXAMPLES`, `CG_BUILD_TOOLS`, `CG_BUILD_BENCH`,
-`CG_BUILD_DISTRIBUTED`, `CG_BUILD_CUDA` (default ON for all except CUDA).
+`CG_BUILD_DISTRIBUTED`, `CG_BUILD_CUDA` (default ON for all except CUDA), and
+`CG_BUILD_ASAN` (OFF). With `CMake 3.20+`, `Ninja`, and the MSVC `cl` driver, `-DCG_BUILD_ASAN=ON`
+builds every target with real `/fsanitize=address` while preserving `/W4 /WX`; it adds `/Zi` so the
+MSVC C5072 "ASAN enabled without debug information" warning is satisfied under `/WX` (the x64
+`clang_rt.asan_dynamic-x86_64` runtime ships with the MSVC toolset).
 
 ## Downstream use
 
@@ -224,10 +236,10 @@ revalidation, and post-action intervention verification.
 
 ## Limitations
 
-- Single configured currency in v1.0.0 (USD). Multiple currencies are not summed.
-- MSVC x64 AddressSanitizer is not linkable in the current environment (only the x86 ASan
-  runtime is installed); the suite is otherwise validated in Release and Debug with
-  `/W4 /WX` and zero first-party warnings. `/RTC` is not substituted for ASan.
+- Single configured currency in v1.0.1 (USD). Multiple currencies are not summed.
+- The suite is validated in Release and Debug with `/W4 /WX` and zero first-party warnings, and
+  in a genuine x64 AddressSanitizer build (`-DCG_BUILD_ASAN=ON`, `/fsanitize=address`, MSVC x64
+  `clang_rt.asan_dynamic-x86_64` runtime). `/RTC` is not substituted for ASan.
 - No real cloud-provider pricing is fabricated; all configured rates are labeled POLICY.
 - Energy telemetry is not measured on the proof hardware; energy usage is estimated at a
   configured power label (SYNTHETIC) and priced with a POLICY rate.

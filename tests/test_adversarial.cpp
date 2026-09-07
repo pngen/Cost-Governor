@@ -50,7 +50,7 @@ CG_TEST_CASE(Adversarial_duplicate_observation_idempotent) {
 CG_TEST_CASE(Adversarial_stale_completion_rejects_no_mutation) {
   auto g = std::make_shared<CostGovernor>(std::make_shared<MockClock>(1000));
   g->set_policy(th::policy());
-  g->set_worker_boot(WorkerBootId(1));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   CostEvidence e = th::attempt(EvidenceId(1), RequestId(1), AttemptId(1), AttemptGeneration(1), CoordinatorEpoch(1), WorkerBootId(1), EvidenceGeneration(1), 1000);
   e.accelerator_time = AcceleratorNanoseconds(1'000'000'000);
   CG_CHECK(g->record_attempt(e) == Status::OK);

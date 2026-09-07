@@ -99,7 +99,7 @@ int main() {
   PriceSchedule s; s.id = PriceScheduleId(1); s.generation = PriceScheduleGeneration(1); s.created_at_ms = kNow;
   auto add = [&](EvidenceId id, PriceKind k, MoneyMicros amt, DataLabel lab) {
     PriceObservation o; o.id = id; o.kind = k; o.amount = amt; o.currency = currency;
-    o.label = lab; o.observed_at_ms = kNow; o.epoch = CoordinatorEpoch(1); o.boot = WorkerBootId(1);
+    o.label = lab; o.observed_at_ms = kNow; o.epoch = CoordinatorEpoch(1); o.worker = WorkerId(1); o.boot = WorkerBootId(1);
     s.observations.push_back(o);
   };
   add(EvidenceId(1), PriceKind::ACCELERATOR_TIME, accel_per_sec, DataLabel::POLICY);
@@ -131,10 +131,10 @@ int main() {
 
   // Retry economics: attempt 1 consumes real GPU time then fails; attempt 2 succeeds.
   auto g2 = std::make_shared<CostGovernor>(std::make_shared<MockClock>(kNow));
-  g2->set_policy(p); g2->set_worker_boot(WorkerBootId(1));
+  g2->set_policy(p); g2->set_worker_boot(WorkerId(1), WorkerBootId(1));
   g2->set_price_schedule(s);
   CostEvidence fail_ev; fail_ev.id = EvidenceId(50); fail_ev.request = RequestId(1); fail_ev.attempt = AttemptId(1);
-  fail_ev.attempt_gen = AttemptGeneration(1); fail_ev.epoch = CoordinatorEpoch(1); fail_ev.boot = WorkerBootId(1);
+  fail_ev.attempt_gen = AttemptGeneration(1); fail_ev.epoch = CoordinatorEpoch(1); fail_ev.worker = WorkerId(1); fail_ev.boot = WorkerBootId(1);
   fail_ev.generation = EvidenceGeneration(1); fail_ev.observed_at_ms = kNow; fail_ev.label = DataLabel::POLICY;
   fail_ev.accelerator_time = AcceleratorNanoseconds(ma.device_ns);
   fail_ev.is_completion = true; fail_ev.completed_successfully = false;

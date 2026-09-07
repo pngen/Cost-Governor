@@ -50,8 +50,9 @@ struct Session {
     Reader r(payload.data(), payload.size());
     switch (type) {
       case Msg::HELLO: {
+        WorkerId worker = get_id<WorkerId>(r);
         WorkerBootId boot = get_id<WorkerBootId>(r);
-        gov.set_worker_boot(boot);
+        gov.set_worker_boot(worker, boot);
         Writer w; w.u64(gov.epoch().value()); w.u64(boot.value());
         reply(Msg::PONG, w.data());
         break;

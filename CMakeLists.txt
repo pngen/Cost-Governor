@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(CostGovernor VERSION 1.0.0 LANGUAGES CXX)
+project(CostGovernor VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,6 +15,19 @@ option(CG_BUILD_TOOLS "Build the cg CLI" ON)
 option(CG_BUILD_BENCH "Build benchmarks" ON)
 option(CG_BUILD_DISTRIBUTED "Build the real multiprocess distributed proof" ON)
 option(CG_BUILD_CUDA "Build the real CUDA proof (requires CUDA + NVIDIA device)" OFF)
+option(CG_BUILD_ASAN "Enable AddressSanitizer across all built targets" OFF)
+
+# Real AddressSanitizer (MSVC: /fsanitize=address with debug info so the
+# C5072 "ASAN enabled without debug information" warning is satisfied under
+# /WX; the per-target /W4 /WX warnings remain in force). Appending here (not
+# replacing CMAKE_CXX_FLAGS) preserves the default /EHsc exception model.
+if(CG_BUILD_ASAN AND MSVC)
+  add_compile_options(/fsanitize=address /Zi)
+  add_link_options(/fsanitize=address)
+elseif(CG_BUILD_ASAN)
+  add_compile_options(-fsanitize=address -g)
+  add_link_options(-fsanitize=address)
+endif()
 
 find_package(Threads REQUIRED)
 

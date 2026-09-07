@@ -96,7 +96,8 @@ struct PriceObservation {
   std::int64_t observed_at_ms = 0;   // freshness timestamp
   EvidenceGeneration generation;
   CoordinatorEpoch epoch;
-  WorkerBootId boot;
+  WorkerId worker;            // which worker published this price
+  WorkerBootId boot;          // the worker's incarnation at publish time
 
   [[nodiscard]] bool valid_currency(const std::string& policy_currency) const noexcept {
     return currency == policy_currency;

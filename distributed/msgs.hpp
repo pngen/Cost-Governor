@@ -15,7 +15,7 @@ inline void encode_price(Writer& w, const costgovernor::PriceObservation& o) {
   put_id(w, o.resource_scope); put_id(w, o.device); w.i64(o.amount.total_micros());
   w.str(o.currency); w.u8(static_cast<std::uint8_t>(o.provenance)); w.u8(static_cast<std::uint8_t>(o.label));
   w.i64(o.valid_from_ms); w.i64(o.valid_to_ms); w.i64(o.observed_at_ms);
-  put_id(w, o.generation); put_id(w, o.epoch); put_id(w, o.boot);
+  put_id(w, o.generation); put_id(w, o.epoch); put_id(w, o.worker); put_id(w, o.boot);
 }
 inline costgovernor::PriceObservation decode_price(Reader& r) {
   costgovernor::PriceObservation o;
@@ -25,13 +25,13 @@ inline costgovernor::PriceObservation decode_price(Reader& r) {
   o.provenance = static_cast<costgovernor::Provenance>(r.u8()); o.label = static_cast<costgovernor::DataLabel>(r.u8());
   o.valid_from_ms = r.i64(); o.valid_to_ms = r.i64(); o.observed_at_ms = r.i64();
   o.generation = get_id<costgovernor::EvidenceGeneration>(r); o.epoch = get_id<costgovernor::CoordinatorEpoch>(r);
-  o.boot = get_id<costgovernor::WorkerBootId>(r);
+  o.worker = get_id<costgovernor::WorkerId>(r); o.boot = get_id<costgovernor::WorkerBootId>(r);
   return o;
 }
 
 inline void encode_plan(Writer& w, const costgovernor::ExecutionPlan& p) {
   put_id(w, p.id); put_id(w, p.generation); put_id(w, p.workload); put_id(w, p.workload_generation);
-  put_id(w, p.resource); put_id(w, p.resource_generation); put_id(w, p.device); put_id(w, p.device_generation);
+  put_id(w, p.resource); put_id(w, p.resource_generation); put_id(w, p.device); put_id(w, p.device_generation); put_id(w, p.worker);
   w.i64(p.expected_accelerator_time.count()); w.i64(p.expected_energy.count());
   w.i64(p.expected_transfer.count()); w.i64(p.expected_memory_hold.count());
   w.i64(p.expected_residency_hold.count()); w.i64(p.expected_storage.count());
@@ -45,6 +45,7 @@ inline costgovernor::ExecutionPlan decode_plan(Reader& r) {
   p.workload = get_id<costgovernor::WorkloadId>(r); p.workload_generation = get_id<costgovernor::WorkloadGeneration>(r);
   p.resource = get_id<costgovernor::ResourceId>(r); p.resource_generation = get_id<costgovernor::ResourceGeneration>(r);
   p.device = get_id<costgovernor::DeviceId>(r); p.device_generation = get_id<costgovernor::DeviceGeneration>(r);
+  p.worker = get_id<costgovernor::WorkerId>(r);
   p.expected_accelerator_time = costgovernor::AcceleratorNanoseconds(r.i64());
   p.expected_energy = costgovernor::EnergyMicroJoules(r.i64());
   p.expected_transfer = costgovernor::TransferBytes(r.i64());
@@ -59,7 +60,7 @@ inline costgovernor::ExecutionPlan decode_plan(Reader& r) {
 
 inline void encode_evidence(Writer& w, const costgovernor::CostEvidence& e) {
   put_id(w, e.id); put_id(w, e.request); put_id(w, e.workload); put_id(w, e.attempt); put_id(w, e.attempt_gen);
-  put_id(w, e.boot); put_id(w, e.epoch); put_id(w, e.generation); w.i64(e.observed_at_ms);
+  put_id(w, e.worker); put_id(w, e.boot); put_id(w, e.epoch); put_id(w, e.generation); w.i64(e.observed_at_ms);
   put_id(w, e.device); put_id(w, e.resource);
   w.u8(static_cast<std::uint8_t>(e.label)); w.u8(e.completed_successfully ? 1 : 0); w.u8(e.is_completion ? 1 : 0);
   w.i64(e.accelerator_time.count()); w.i64(e.energy.count()); w.i64(e.transfer.count());
@@ -70,7 +71,7 @@ inline costgovernor::CostEvidence decode_evidence(Reader& r) {
   costgovernor::CostEvidence e;
   e.id = get_id<costgovernor::EvidenceId>(r); e.request = get_id<costgovernor::RequestId>(r);
   e.workload = get_id<costgovernor::WorkloadId>(r); e.attempt = get_id<costgovernor::AttemptId>(r);
-  e.attempt_gen = get_id<costgovernor::AttemptGeneration>(r); e.boot = get_id<costgovernor::WorkerBootId>(r);
+  e.attempt_gen = get_id<costgovernor::AttemptGeneration>(r); e.worker = get_id<costgovernor::WorkerId>(r); e.boot = get_id<costgovernor::WorkerBootId>(r);
   e.epoch = get_id<costgovernor::CoordinatorEpoch>(r); e.generation = get_id<costgovernor::EvidenceGeneration>(r);
   e.observed_at_ms = r.i64(); e.device = get_id<costgovernor::DeviceId>(r); e.resource = get_id<costgovernor::ResourceId>(r);
   e.label = static_cast<costgovernor::DataLabel>(r.u8());

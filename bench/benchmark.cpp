@@ -12,12 +12,12 @@ std::shared_ptr<CostGovernor> make_gov() {
   CostPolicy p; p.currency = MoneyMicros::kDefaultCurrency;
   p.max_evidence_age_ms = 300000; p.price_schedule_max_age_ms = 300000;
   p.allow_policy = true; p.allow_measured = true; p.allow_synthetic = true;
-  g->set_policy(p); g->set_worker_boot(WorkerBootId(1));
+  g->set_policy(p); g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   PriceSchedule s; s.id = PriceScheduleId(1); s.generation = PriceScheduleGeneration(1); s.created_at_ms = 1;
   for (EvidenceId i(1); i.value() <= 10; i = EvidenceId(i.value() + 1)) {
     PriceObservation o; o.id = i; o.kind = PriceKind::ACCELERATOR_TIME; o.amount = MoneyMicros::from_micros(1000);
     o.currency = MoneyMicros::kDefaultCurrency; o.label = DataLabel::POLICY; o.observed_at_ms = 1;
-    o.epoch = CoordinatorEpoch(1); o.boot = WorkerBootId(1); s.observations.push_back(o);
+    o.epoch = CoordinatorEpoch(1); o.worker = WorkerId(1); o.boot = WorkerBootId(1); s.observations.push_back(o);
   }
   g->set_price_schedule(s);
   Budget b; b.id = BudgetId(1); b.generation = BudgetGeneration(1); b.policy_generation = CostPolicyGeneration(1);
@@ -46,7 +46,7 @@ int main() {
     auto t0 = SteadyClock::now();
     for (long i = 0; i < scale; ++i) {
       CostEvidence e; e.id = EvidenceId(1000 + i); e.request = RequestId(i + 1); e.attempt = AttemptId(1);
-      e.attempt_gen = AttemptGeneration(1); e.epoch = CoordinatorEpoch(1); e.boot = WorkerBootId(1);
+      e.attempt_gen = AttemptGeneration(1); e.epoch = CoordinatorEpoch(1); e.worker = WorkerId(1); e.boot = WorkerBootId(1);
       e.generation = EvidenceGeneration(1); e.observed_at_ms = 1;
       e.accelerator_time = AcceleratorNanoseconds(1'000'000);
       g->record_attempt(e);

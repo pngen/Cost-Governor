@@ -35,20 +35,22 @@ inline Budget budget(BudgetId id, BudgetGeneration gen, CostPolicyGeneration pg,
 inline PriceObservation price(EvidenceId id, PriceKind kind, MoneyMicros per_unit,
                               std::int64_t now, DataLabel label = DataLabel::POLICY,
                               CoordinatorEpoch epoch = CoordinatorEpoch(1),
-                              WorkerBootId boot = WorkerBootId(0)) {
+                              WorkerBootId boot = WorkerBootId(0),
+                              WorkerId worker = WorkerId(1)) {
   PriceObservation o;
   o.id = id; o.kind = kind; o.amount = per_unit; o.currency = MoneyMicros::kDefaultCurrency;
   o.label = label; o.provenance = Provenance::CONFIGURED_POLICY;
-  o.observed_at_ms = now; o.epoch = epoch; o.boot = boot;
+  o.observed_at_ms = now; o.epoch = epoch; o.worker = worker; o.boot = boot;
   return o;
 }
 
 inline CostEvidence attempt(EvidenceId id, RequestId req, AttemptId att, AttemptGeneration attGen,
                             CoordinatorEpoch epoch, WorkerBootId boot, EvidenceGeneration gen,
-                            std::int64_t now, DataLabel label = DataLabel::POLICY) {
+                            std::int64_t now, DataLabel label = DataLabel::POLICY,
+                            WorkerId worker = WorkerId(1)) {
   CostEvidence e;
   e.id = id; e.request = req; e.attempt = att; e.attempt_gen = attGen;
-  e.epoch = epoch; e.boot = boot; e.generation = gen; e.observed_at_ms = now; e.label = label;
+  e.epoch = epoch; e.worker = worker; e.boot = boot; e.generation = gen; e.observed_at_ms = now; e.label = label;
   return e;
 }
 

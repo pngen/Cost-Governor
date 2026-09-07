@@ -80,7 +80,7 @@ void write_obs(Writer& w, const PriceObservation& o) {
   write_id(w, o.resource_scope); write_id(w, o.device); w.i64(o.amount.total_micros());
   w.str(o.currency); w.u8(static_cast<std::uint8_t>(o.provenance)); w.u8(static_cast<std::uint8_t>(o.label));
   w.i64(o.valid_from_ms); w.i64(o.valid_to_ms); w.i64(o.observed_at_ms);
-  write_id(w, o.generation); write_id(w, o.epoch); write_id(w, o.boot);
+  write_id(w, o.generation); write_id(w, o.epoch); write_id(w, o.worker); write_id(w, o.boot);
 }
 PriceObservation read_obs(Reader& r) {
   PriceObservation o;
@@ -88,7 +88,7 @@ PriceObservation read_obs(Reader& r) {
   o.resource_scope = read_id<ResourceId>(r); o.device = read_id<DeviceId>(r); o.amount = MoneyMicros::from_micros(r.i64());
   o.currency = r.str(); o.provenance = static_cast<Provenance>(r.u8()); o.label = static_cast<DataLabel>(r.u8());
   o.valid_from_ms = r.i64(); o.valid_to_ms = r.i64(); o.observed_at_ms = r.i64();
-  o.generation = read_id<EvidenceGeneration>(r); o.epoch = read_id<CoordinatorEpoch>(r); o.boot = read_id<WorkerBootId>(r);
+  o.generation = read_id<EvidenceGeneration>(r); o.epoch = read_id<CoordinatorEpoch>(r); o.worker = read_id<WorkerId>(r); o.boot = read_id<WorkerBootId>(r);
   return o;
 }
 

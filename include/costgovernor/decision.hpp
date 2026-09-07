@@ -22,7 +22,8 @@ struct AuthorityContext {
   EvidenceGeneration evidence_generation;
   PlanGeneration plan_generation;
   WorkloadGeneration workload_generation;
-  WorkerBootId boot;
+  WorkerId worker;             // worker whose plan/evidence this authority belongs to
+  WorkerBootId boot;           // that worker's incarnation at snapshot time
   ResourceGeneration resource_generation;
   PlacementGeneration placement_generation;
   RecoveryGeneration recovery_generation;
@@ -34,7 +35,7 @@ struct AuthorityContext {
     return !(epoch == other.epoch && policy_generation == other.policy_generation &&
              price_generation == other.price_generation && evidence_generation == other.evidence_generation &&
              plan_generation == other.plan_generation && workload_generation == other.workload_generation &&
-             boot == other.boot && resource_generation == other.resource_generation &&
+             worker == other.worker && boot == other.boot && resource_generation == other.resource_generation &&
              placement_generation == other.placement_generation && recovery_generation == other.recovery_generation &&
              budget_generation == other.budget_generation);
   }

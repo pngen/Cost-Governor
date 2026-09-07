@@ -9,7 +9,7 @@ std::shared_ptr<CostGovernor> gov() {
   auto clock = std::make_shared<MockClock>(1000);
   auto g = std::make_shared<CostGovernor>(clock);
   g->set_policy(th::policy());
-  g->set_worker_boot(WorkerBootId(1));
+  g->set_worker_boot(WorkerId(1), WorkerBootId(1));
   PriceSchedule s;
   s.id = PriceScheduleId(1); s.generation = PriceScheduleGeneration(1); s.created_at_ms = 1000;
   s.observations.push_back(th::price(EvidenceId(1), PriceKind::ACCELERATOR_TIME, MoneyMicros::from_micros(1000), 1000));
@@ -58,7 +58,7 @@ CG_TEST_CASE(Retry_duplicate_completion_no_double_charge) {
 CG_TEST_CASE(Retry_stale_attempt_never_charges) {
   auto g = gov();
   CG_CHECK(g->record_attempt(mk(EvidenceId(30), AttemptId(1), 1'000'000'000, true, true)) == Status::OK);
-  g->set_worker_boot(WorkerBootId(2));  // fresh boot
+  g->set_worker_boot(WorkerId(1), WorkerBootId(2));  // fresh boot
   CostEvidence stale = mk(EvidenceId(31), AttemptId(2), 5'000'000'000, true, true);
   stale.boot = WorkerBootId(1);  // old boot replay
   CG_CHECK(g->record_attempt(stale) == Status::STALE_AUTHORITY);

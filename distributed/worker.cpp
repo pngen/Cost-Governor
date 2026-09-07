@@ -25,12 +25,12 @@ bool connect_to(int port, Sock& out) {
   out = Sock(s);
   return true;
 }
-void publish(FramedEndpoint& ep, PriceKind kind, DeviceId dev, MoneyMicros per_unit, WorkerBootId boot, std::int64_t now) {
+void publish(FramedEndpoint& ep, PriceKind kind, DeviceId dev, MoneyMicros per_unit, WorkerBootId boot, WorkerId worker, std::int64_t now) {
   PriceObservation o;
   o.id = EvidenceId(1000 + static_cast<std::uint64_t>(kind) * 100 + dev.value());
   o.kind = kind; o.device = dev; o.amount = per_unit; o.currency = MoneyMicros::kDefaultCurrency;
   o.label = DataLabel::POLICY; o.provenance = Provenance::CONFIGURED_POLICY;
-  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.boot = boot;
+  o.observed_at_ms = now; o.epoch = CoordinatorEpoch(1); o.worker = worker; o.boot = boot;
   Writer w; encode_price(w, o); ep.send(Msg::PUBLISH_PRICE, w.data());
   Msg t; std::vector<std::uint8_t> payload; ep.recv(t, payload);
   Reader r(payload.data(), payload.size());
@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
   }
   if (port == 0) return 2;
   WorkerBootId boot = boot_override ? WorkerBootId(boot_override) : (kind == "A" ? WorkerBootId(10) : WorkerBootId(20));
+  WorkerId worker(kind == "A" ? 1 : 2);
   DeviceId device(kind == "A" ? 1 : 2);
   std::int64_t now = kNow;
   FramedEndpoint ep;
@@ -61,17 +62,17 @@ int main(int argc, char** argv) {
   }
   if (!s.valid()) { std::cerr << "[worker " << kind << "] cannot connect\n"; return 1; }
   ep.sock = std::move(s);
-  // HELLO
+  // HELLO (worker identity + incarnation)
   {
-    Writer w; w.u64(boot.value()); ep.send(Msg::HELLO, w.data());
+    Writer w; w.u64(worker.value()); w.u64(boot.value()); ep.send(Msg::HELLO, w.data());
     Msg t; std::vector<std::uint8_t> payload; ep.recv(t, payload);
   }
   if (kind == "A") {
-    publish(ep, PriceKind::ACCELERATOR_TIME, device, MoneyMicros::from_micros(5000), boot, now);  // high accel price
-    publish(ep, PriceKind::TRANSFER, device, MoneyMicros::from_micros(1000), boot, now);          // low transfer price
+    publish(ep, PriceKind::ACCELERATOR_TIME, device, MoneyMicros::from_micros(5000), boot, worker, now);  // high accel price
+    publish(ep, PriceKind::TRANSFER, device, MoneyMicros::from_micros(1000), boot, worker, now);          // low transfer price
   } else {
-    publish(ep, PriceKind::ACCELERATOR_TIME, device, MoneyMicros::from_micros(1000), boot, now);   // low accel price
-    publish(ep, PriceKind::TRANSFER, device, MoneyMicros::from_micros(10000), boot, now);          // high transfer price
+    publish(ep, PriceKind::ACCELERATOR_TIME, device, MoneyMicros::from_micros(1000), boot, worker, now);   // low accel price
+    publish(ep, PriceKind::TRANSFER, device, MoneyMicros::from_micros(10000), boot, worker, now);          // high transfer price
   }
   std::cerr << "[worker " << kind << "] published (boot=" << boot.value() << ")\n";
   if (stay) {

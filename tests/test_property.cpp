@@ -121,7 +121,7 @@ CG_TEST_CASE(Property_restart_requires_revalidation) {
     g->set_state_path(path);
     CG_CHECK(g->load() == Status::OK);
     g->advance_epoch();
-    g->set_worker_boot(WorkerBootId(500));
+    g->set_worker_boot(WorkerId(1), WorkerBootId(500));
     ExecutionPlan a = th::plan(PlanId(1), PlanGeneration(1), WorkloadId(1), WorkloadGeneration(1));
     a.expected_accelerator_time = AcceleratorNanoseconds(1'000'000'000);
     std::vector<ExecutionPlan> plans{a};

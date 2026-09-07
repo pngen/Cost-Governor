@@ -41,6 +41,7 @@ struct ExecutionPlan {
   PlacementId placement;
   PlacementGeneration placement_generation;
   RecoveryGeneration recovery_generation;
+  WorkerId worker;               // worker this plan is destined for / produced by
 
   AcceleratorNanoseconds expected_accelerator_time;
   EnergyMicroJoules expected_energy;
