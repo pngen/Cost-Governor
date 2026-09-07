@@ -43,8 +43,12 @@ struct DurableSnapshot {
 // Deterministic binary codec. Layout: MAGIC(8) VERSION(4) PAYLOAD_LEN(8)
 // CRC32(payload). Unknown version, truncated payload, trailing garbage, and
 // checksum mismatch all reject. All decoders are bounds-checked.
+//
+// Format versions:
+//   v1 (Cost Governor 1.0.0): no WorkerId on a persisted PriceObservation.
+//   v2 (Cost Governor 1.0.1): PriceObservation carries WorkerId before WorkerBootId.
 struct SnapshotCodec {
-  static constexpr std::uint32_t kVersion = 1;
+  static constexpr std::uint32_t kVersion = 2;
   static constexpr const char* kMagic = "CGSNAP01";
   [[nodiscard]] static std::vector<std::uint8_t> encode(const DurableSnapshot& s);
   [[nodiscard]] static DurableSnapshot decode(const std::vector<std::uint8_t>& bytes);
@@ -57,7 +61,8 @@ class StateStore {
  public:
   explicit StateStore(std::string path);
   Status save(const DurableSnapshot& s) const;
-  // Loads; throws StatusError(PERSISTENCE_CORRUPT) on any integrity failure.
+  // Loads; throws StatusError(PERSISTENCE_CORRUPT) on any integrity failure and
+  // StatusError(PERSISTENCE_UNSUPPORTED_VERSION) on a v1 (Cost Governor 1.0.0) snapshot.
   DurableSnapshot load() const;
   [[nodiscard]] const std::string& path() const noexcept { return path_; }
   static bool exists(const std::string& path);

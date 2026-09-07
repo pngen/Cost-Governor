@@ -172,7 +172,12 @@ DurableSnapshot SnapshotCodec::decode(const std::vector<std::uint8_t>& bytes) {
   if (std::memcmp(bytes.data(), kMagic, 8) != 0) throw_status(Status::PERSISTENCE_CORRUPT, "bad snapshot magic");
   std::uint32_t version = 0;
   for (int i = 0; i < 4; ++i) version |= static_cast<std::uint32_t>(bytes[8 + i]) << (8 * i);
-  if (version > kVersion) throw_status(Status::PERSISTENCE_CORRUPT, "unknown snapshot version");
+  // Format dispatch is decided by the version header alone. A v1.0.0 (v1) snapshot
+  // (no WorkerId on a persisted PriceObservation) is never interpreted as the current
+  // layout: reject it explicitly and deterministically before any payload parsing so
+  // old bytes are never silently misparsed as the new format.
+  if (version == 1) throw_status(Status::PERSISTENCE_UNSUPPORTED_VERSION, "snapshot format v1 (Cost Governor 1.0.0) is unsupported; regenerate state under the current format");
+  if (version != kVersion) throw_status(Status::PERSISTENCE_CORRUPT, "unknown snapshot version");
   std::uint64_t len = 0;
   for (int i = 0; i < 8; ++i) len |= static_cast<std::uint64_t>(bytes[12 + i]) << (8 * i);
   std::uint32_t stored_crc = 0;

@@ -24,6 +24,7 @@ enum class Status : std::uint8_t {
   RESOURCE_EXHAUSTED,
   CANCELLED,
   SHUTTING_DOWN,
+  PERSISTENCE_UNSUPPORTED_VERSION,
 };
 constexpr std::string_view status_name(Status s) noexcept {
   switch (s) {
@@ -45,6 +46,7 @@ constexpr std::string_view status_name(Status s) noexcept {
     case Status::RESOURCE_EXHAUSTED: return "RESOURCE_EXHAUSTED";
     case Status::CANCELLED: return "CANCELLED";
     case Status::SHUTTING_DOWN: return "SHUTTING_DOWN";
+    case Status::PERSISTENCE_UNSUPPORTED_VERSION: return "PERSISTENCE_UNSUPPORTED_VERSION";
   }
   return "UNKNOWN";
 }

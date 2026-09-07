@@ -124,9 +124,14 @@ feasibility, and hard constraints; a stale plan is never dispatched.
 Durable state (policies, budgets, completed accounting, historical realized cost, price
 schedules, intervention history, stable identities) is written to a versioned, checksummed,
 bounded snapshot with atomic save. Decoding rejects corruption, truncation, trailing garbage,
-unknown version, and out-of-bounds counts. Live process authority (sockets, in-flight
-reservations) is intentionally not persisted. On restart the CoordinatorEpoch advances, and
-recovered dynamic evidence requires revalidation before any current cost decision resumes.
+unknown/future versions, and out-of-bounds counts. The on-disk protocol is format-versioned
+(`SnapshotCodec::kVersion`); the current format is v2 (a persisted `PriceObservation` carries its
+`WorkerId`). A v1 (Cost Governor 1.0.0) snapshot, where a persisted `PriceObservation` did not
+carry its `WorkerId`, is never silently reinterpreted as the current format: it is rejected
+explicitly with `Status::PERSISTENCE_UNSUPPORTED_VERSION` (regenerate the state under the current
+format). Live process authority (sockets, in-flight reservations) is intentionally not
+persisted. On restart the CoordinatorEpoch advances, and recovered dynamic evidence requires
+revalidation before any current cost decision resumes.
 
 ## Distributed proof
 
@@ -236,10 +241,13 @@ revalidation, and post-action intervention verification.
 
 ## Limitations
 
-- Single configured currency in v1.0.1 (USD). Multiple currencies are not summed.
+- Single configured currency in v1.0.2 (USD). Multiple currencies are not summed.
 - The suite is validated in Release and Debug with `/W4 /WX` and zero first-party warnings, and
   in a genuine x64 AddressSanitizer build (`-DCG_BUILD_ASAN=ON`, `/fsanitize=address`, MSVC x64
   `clang_rt.asan_dynamic-x86_64` runtime). `/RTC` is not substituted for ASan.
+- The on-disk snapshot protocol is format v2. A v1.0.0 (format v1) snapshot is rejected
+  explicitly as unsupported (`Status::PERSISTENCE_UNSUPPORTED_VERSION`) rather than silently
+  reinterpreted under the current layout; regenerate state under the current version.
 - No real cloud-provider pricing is fabricated; all configured rates are labeled POLICY.
 - Energy telemetry is not measured on the proof hardware; energy usage is estimated at a
   configured power label (SYNTHETIC) and priced with a POLICY rate.

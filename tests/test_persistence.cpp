@@ -31,6 +31,18 @@ void write_file(const std::string& p, const std::vector<std::uint8_t>& v) {
   std::ofstream f(p, std::ios::binary | std::ios::trunc);
   f.write(reinterpret_cast<const char*>(v.data()), static_cast<std::streamsize>(v.size()));
 }
+// Rewrite the LE VERSION field (bytes 8..11) of an encoded snapshot.
+std::vector<std::uint8_t> with_version(const std::vector<std::uint8_t>& bytes, std::uint32_t ver) {
+  std::vector<std::uint8_t> b = bytes;
+  for (int i = 0; i < 4; ++i) b[8 + i] = static_cast<std::uint8_t>((ver >> (8 * i)) & 0xFF);
+  return b;
+}
+std::vector<std::uint8_t> encode_current() { return SnapshotCodec::encode(make_snap()); }
+// Returns true iff loading `path` throws a StatusError with exactly `want`.
+bool load_status(const std::string& path, Status want) {
+  try { (void)StateStore(path).load(); return false; }
+  catch (const StatusError& e) { return e.status() == want; }
+}
 }
 
 CG_TEST_CASE(Persistence_roundtrip) {
@@ -38,9 +50,20 @@ CG_TEST_CASE(Persistence_roundtrip) {
   if (StateStore::exists(path)) StateStore::remove(path);
   StateStore store(path);
   DurableSnapshot s = make_snap();
+  s.price_schedule.observations[0].worker = WorkerId(1);
   CG_CHECK(store.save(s) == Status::OK);
+  // The current on-disk format version is 2 (a persisted PriceObservation carries its
+  // WorkerId). Assert the header VERSION field written by this round-trip is the current
+  // version, and that the WorkerId survives the round-trip.
+  {
+    auto raw = read_file(path);
+    std::uint32_t ver = 0;
+    for (int i = 0; i < 4; ++i) ver |= static_cast<std::uint32_t>(raw[8 + i]) << (8 * i);
+    CG_CHECK(ver == SnapshotCodec::kVersion);
+  }
   DurableSnapshot loaded = store.load();
   CG_CHECK(loaded.epoch == CoordinatorEpoch(3));
+  CG_CHECK(loaded.price_schedule.observations[0].worker == WorkerId(1));
   CG_CHECK(loaded.policy.generation == CostPolicyGeneration(5));
   CG_CHECK(loaded.price_schedule.generation == PriceScheduleGeneration(2));
   CG_CHECK(loaded.budgets.size() == 1);
@@ -101,5 +124,48 @@ CG_TEST_CASE(Persistence_unknown_version_rejected) {
   bool threw = false;
   try { (void)store.load(); } catch (const StatusError& e) { threw = e.status() == Status::PERSISTENCE_CORRUPT; }
   CG_CHECK(threw);
+  StateStore::remove(path);
+}
+
+CG_TEST_CASE(Persistence_v1_rejected_explicit) {
+  std::string path = "cgtest_v1.bin";
+  if (StateStore::exists(path)) StateStore::remove(path);
+  // A v1.0.0 (format v1) snapshot is rejected explicitly and deterministically
+  // by its version header, before any payload is interpreted.
+  write_file(path, with_version(encode_current(), 1));
+  CG_CHECK(load_status(path, Status::PERSISTENCE_UNSUPPORTED_VERSION));
+  StateStore::remove(path);
+}
+
+CG_TEST_CASE(Persistence_v1_corrupt_and_truncated_rejected_safely) {
+  std::string path = "cgtest_v1_integ.bin";
+  if (StateStore::exists(path)) StateStore::remove(path);
+  // Corrupt v1 payload: version dispatch precedes integrity checks, so a corrupt
+  // old-format snapshot is rejected as unsupported (never accepted, never crashes).
+  std::vector<std::uint8_t> corrupt = with_version(encode_current(), 1);
+  corrupt[24] ^= 0xFF;  // flip a payload byte
+  write_file(path, corrupt);
+  CG_CHECK(load_status(path, Status::PERSISTENCE_UNSUPPORTED_VERSION));
+  // Truncated v1 (header intact, payload dropped): still rejected as unsupported.
+  std::vector<std::uint8_t> trunc = with_version(encode_current(), 1);
+  trunc.resize(24);  // keep MAGIC+VERSION+LEN+CRC only
+  write_file(path, trunc);
+  CG_CHECK(load_status(path, Status::PERSISTENCE_UNSUPPORTED_VERSION));
+  StateStore::remove(path);
+}
+
+CG_TEST_CASE(Persistence_no_ambiguous_layout_acceptance) {
+  std::string path = "cgtest_v1_ambig.bin";
+  if (StateStore::exists(path)) StateStore::remove(path);
+  // The decoder dispatches on the version header alone, never on payload shape:
+  // the byte-identical payload decodes under the current version but is rejected
+  // under a v1 version header.
+  std::vector<std::uint8_t> payload = encode_current();
+  write_file(path, payload);
+  bool ok = true;
+  try { (void)StateStore(path).load(); } catch (...) { ok = false; }
+  CG_CHECK(ok);
+  write_file(path, with_version(payload, 1));
+  CG_CHECK(load_status(path, Status::PERSISTENCE_UNSUPPORTED_VERSION));
   StateStore::remove(path);
 }
