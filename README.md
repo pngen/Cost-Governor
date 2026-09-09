@@ -16,8 +16,6 @@ that was economical at admission may become uneconomical after failure, contenti
 or resource-price changes. Cost Governor makes execution economics an explicit runtime
 authority boundary.
 
-Copyright 2026 Summon Software Labs. Licensed under the Apache License 2.0.
-
 ## Systems boundary
 
 Cost Governor **owns** execution-cost policy and budgets; typed monetary and non-monetary cost
